@@ -16,6 +16,40 @@ Mục tiêu cuối cùng không phải là "ép mọi app chạy nền vô hạn
 
 > Loại bỏ càng nhiều nguyên nhân phía thiết bị/Xiaomi càng tốt để notification đến đúng lúc, đồng thời không phá toàn bộ cơ chế quản lý pin của hệ thống.
 
+### Yêu cầu sản phẩm cuối cùng
+
+Sản phẩm phải là **một ứng dụng Android cài bằng APK**. Sau khi cài, toàn bộ trải nghiệm sử dụng phải diễn ra trong chính ứng dụng:
+
+```text
+cài APK
+→ mở app
+→ chạy kiểm tra / setup cần thiết
+→ chọn app cần bảo vệ
+→ bật protection
+→ app tự giám sát, sửa và báo trạng thái
+```
+
+Không thiết kế sản phẩm cuối theo kiểu:
+
+```text
+cắm PC
+→ chạy script ADB
+→ nhập lệnh thủ công
+→ mở nhiều tool rời
+```
+
+PC, ADB, JADX và các công cụ reverse-engineering chỉ phục vụ **quá trình phát triển và nghiên cứu**, không được là dependency khi người dùng sử dụng app.
+
+Nếu Android/HyperOS bắt buộc cần quyền mà APK thường không thể tự cấp, có thể dùng **Shizuku hoặc ADB như bước bootstrap tạm thời**. Tuy nhiên mục tiêu kiến trúc là:
+
+- Chỉ một APK của project cần được cài lâu dài.
+- Không cần root.
+- Không cần giữ Developer options bật trong sử dụng hằng ngày.
+- Không cần giữ Shizuku chạy thường xuyên nếu quyền/policy có thể persist.
+- Mọi chức năng có thể chạy không đặc quyền phải chạy trực tiếp trong APK.
+- Chức năng nào thật sự cần đặc quyền phải được app phát hiện và giải thích rõ, không âm thầm phụ thuộc external tool.
+- Sau reboot, nếu một state runtime bị reset thì người dùng chỉ cần mở app để audit/repair; không coi việc phải cắm lại PC là flow bình thường.
+
 Không có giải pháp nào có thể bảo đảm 100% mọi notification luôn đến đúng giờ, vì còn phụ thuộc server của ứng dụng, FCM backend, mạng, token, priority của message và logic của chính ứng dụng. Nhưng có thể giảm rất mạnh phần lỗi do HyperOS China gây ra.
 
 ---
@@ -526,20 +560,24 @@ Không dùng root làm requirement vì:
 - Play Integrity / anti-tamper có thể bị ảnh hưởng.
 - Làm tăng maintenance cost rất lớn.
 
-### 7.2 Shizuku chỉ dùng khi bootstrap / deep repair
+### 7.2 Mô hình một APK, bootstrap đặc quyền chỉ khi thật sự bắt buộc
 
-Mục tiêu:
+Ứng dụng phải được thiết kế theo nguyên tắc **APK-first**: mọi logic chẩn đoán, policy engine, guard, recovery, logging và UI đều nằm trong APK.
+
+Nếu một số quyền hệ thống không thể được APK tự cấp do Android security model, bước bootstrap có thể là:
 
 ```text
-bật Developer options
-→ bật Shizuku
-→ cấp quyền / apply state đặc quyền
-→ verify
+cài APK
+→ app phát hiện quyền còn thiếu
+→ tạm bật Developer options + Shizuku/ADB
+→ app tự thực hiện bootstrap
+→ verify quyền/policy
 → tắt Shizuku
 → tắt Developer options
+→ tiếp tục sử dụng chính APK
 ```
 
-Trong dùng hằng ngày, app phải tự hoạt động được tối đa có thể.
+Shizuku không được trở thành backend bắt buộc cho thao tác hằng ngày. Nếu có tính năng chỉ chạy được khi shell identity đang tồn tại, tính năng đó phải được đánh dấu rõ là **Deep Repair / Advanced Diagnostic**, không được âm thầm làm dependency của core notification protection.
 
 ### 7.3 Persistent permission cho app
 
@@ -668,11 +706,11 @@ notification presentation
 
 Vì vậy một app fix đúng nghĩa phải là:
 
-> Notification reliability manager + diagnostics engine + policy repair engine
+> **Một APK hoàn chỉnh chứa Notification Reliability Manager + Diagnostics Engine + Policy Repair Engine + Recovery Guard.**
 
-chứ không phải chỉ là một nút bật Autostart hoặc một script ADB gồm vài lệnh.
+Nó không phải chỉ là một nút bật Autostart, không phải wrapper cho vài lệnh ADB, và cũng không phải một bộ script yêu cầu người dùng có PC.
 
-Thiết kế cuối cùng phải luôn probe firmware thật, apply thay đổi nhỏ nhất có thể, verify từng layer và có rollback.
+Thiết kế cuối cùng phải luôn probe firmware thật, apply thay đổi nhỏ nhất có thể, verify từng layer và có rollback. Công cụ ngoài APK chỉ được dùng trong quá trình phát triển hoặc bootstrap đặc quyền khi Android bắt buộc, không phải trải nghiệm sử dụng bình thường.
 
 ---
 
