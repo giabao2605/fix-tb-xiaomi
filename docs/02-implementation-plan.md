@@ -2,17 +2,61 @@
 
 ## 1. Mục tiêu
 
-Xây dựng một APK dành cho Xiaomi China ROM, tập trung vào **backend notification reliability**, có khả năng:
+Xây dựng **một ứng dụng Android hoàn chỉnh, phân phối dưới dạng một APK duy nhất**, dành cho Xiaomi China ROM và tập trung vào **backend notification reliability**.
+
+### Product contract bắt buộc
+
+Kết quả cuối cùng phải thỏa flow:
+
+```text
+User tải APK
+    ↓
+cài một lần
+    ↓
+mở app
+    ↓
+app tự probe thiết bị
+    ↓
+app hướng dẫn / thực hiện setup cần thiết
+    ↓
+user chọn các app cần bảo vệ
+    ↓
+Protection Engine chạy từ chính APK
+```
+
+Ứng dụng phải:
 
 - Chẩn đoán chính xác notification đang hỏng ở layer nào.
 - Áp dụng fix sâu nhất có thể mà không cần root.
-- Chỉ dùng Shizuku/ADB tạm thời cho bootstrap hoặc deep repair.
-- Sau setup có thể tắt Developer options và Shizuku.
-- Không yêu cầu app phải tự hồi sinh hoàn hảo sau reboot.
-- Sau reboot người dùng có thể mở app thủ công để audit + repair.
+- Chứa toàn bộ core logic trong APK: probe, diagnostics, policy engine, guard, recovery, logging và UI.
+- Không yêu cầu Android Studio, Java, Gradle, ADB hay PC để sử dụng hằng ngày.
+- Không biến project thành desktop script hoặc ADB wrapper.
+- Nếu cần Shizuku/ADB để vượt giới hạn permission của Android, chỉ dùng chúng cho **bootstrap tạm thời / deep repair**.
+- Sau bootstrap, ưu tiên để app tiếp tục vận hành khi Shizuku và Developer options đã tắt.
+- Không yêu cầu app phải tự hồi sinh hoàn hảo sau reboot; user có thể mở app lại để audit/repair.
 - Không phá toàn bộ cơ chế tiết kiệm pin của Android/HyperOS.
 - Có rollback.
 - Có log kỹ thuật đủ sâu để debug firmware mới.
+- Mọi tính năng không thể hoạt động khi thiếu quyền đặc biệt phải báo rõ capability thay vì giả vờ thành công.
+
+### Runtime dependency rule
+
+```text
+BẮT BUỘC CÀI LÂU DÀI:
+- APK của project
+
+KHÔNG ĐƯỢC LÀ DEPENDENCY HẰNG NGÀY:
+- PC
+- Android Studio
+- ADB
+- JADX
+- terminal script
+
+CHỈ ĐƯỢC DÙNG KHI THẬT SỰ CẦN BOOTSTRAP:
+- Shizuku / ADB shell
+```
+
+Nếu có thể đạt cùng hiệu quả bằng persistent permission hoặc direct SettingsProvider access sau bootstrap, phải ưu tiên cách đó thay vì giữ Shizuku sống.
 
 Target đầu tiên:
 
@@ -187,6 +231,31 @@ Không nhất thiết phải tạo đúng package structure này ngay từ commi
 
 # 4. Phase 0 — Project foundation
 
+## 4.0 Build và distribution pipeline
+
+Codex phải dựng project để **repo tự build được APK**, không phụ thuộc máy người dùng đã cài Android Studio.
+
+Bắt buộc có:
+
+- Gradle Wrapper commit trong repo.
+- GitHub Actions workflow build debug APK ở mỗi pull request/push phù hợp.
+- Workflow build release artifact khi tạo tag/release.
+- Artifact APK có tên/version rõ ràng.
+- Build từ clean checkout phải chạy được trên CI.
+- Không commit local SDK path, signing secret hoặc file máy cá nhân.
+
+Development pipeline mong muốn:
+
+```text
+Codex sửa code
+→ push GitHub
+→ GitHub Actions build
+→ APK artifact
+→ cài APK lên Xiaomi thật để test
+```
+
+Android Studio chỉ là công cụ tùy chọn cho developer, không phải requirement để build/test flow cơ bản.
+
 ## 4.1 Tạo Android project
 
 Khuyến nghị:
@@ -333,7 +402,7 @@ Nếu ID không match behavior expected → mark unsupported.
 
 # 6. Phase 2 — Bootstrap permission model
 
-Mục tiêu là dùng Shizuku **một lần hoặc rất ít lần**.
+Mục tiêu là **một APK hoạt động độc lập tối đa có thể**. Shizuku/ADB chỉ là bootstrap privilege source khi Android không cho APK tự nâng quyền. Core architecture không được xây quanh việc Shizuku luôn tồn tại.
 
 ## 6.1 Capability levels
 
@@ -388,25 +457,38 @@ Dùng cho:
 
 ## 6.2 Bootstrap flow
 
+Bootstrap phải được điều khiển từ chính APK. User không được yêu cầu copy/paste hàng loạt lệnh shell như flow sản phẩm chính.
+
 ```text
-Start bootstrap
+Install APK
     ↓
-detect Shizuku
+Open app
     ↓
-request access
+ROM Probe
     ↓
-grant persistent permissions
-    ↓
-apply shell-only baseline
-    ↓
-verify every mutation
-    ↓
-store capability matrix
-    ↓
-user may disable Shizuku + Developer options
+Core có đủ quyền?
+   ↙          ↘
+ YES          NO
+  ↓            ↓
+run        app hiển thị Bootstrap Wizard
+             ↓
+       temporary Shizuku/ADB privilege
+             ↓
+       grant persistent permissions
+             ↓
+       apply shell-only baseline
+             ↓
+       verify every mutation
+             ↓
+       store capability matrix
+             ↓
+       Shizuku có thể tắt
+       Developer options có thể tắt
+             ↓
+       APK tiếp tục vận hành
 ```
 
-Không được ép user giữ Developer options bật.
+Không được ép user giữ Developer options bật. Nếu bootstrap không khả dụng, app vẫn phải chạy diagnostics và các protection mà quyền hiện tại cho phép, đồng thời hiển thị rõ phần nào bị giới hạn.
 
 ---
 
@@ -881,22 +963,27 @@ Không đáp ứng đủ → giữ Experimental.
 
 # 17. Phase 13 — Reboot behavior
 
-Không đặt mục tiêu app tự chạy hoàn hảo ngay sau boot ở bản đầu.
+Không bắt buộc v1 phải tự chạy hoàn hảo ngay sau boot. Tuy nhiên **reboot không được biến app thành tool cần PC để phục hồi**.
 
-Sau reboot:
+Flow chấp nhận được:
 
 ```text
-user mở app
+reboot
+    ↓
+user mở chính APK
     ↓
 Quick Audit
     ↓
-Persistent state OK?
-    ↓
-repair bằng app permission
-    ↓
-shell-only state thiếu?
-    ↓
-đề nghị Deep Repair bằng Shizuku
+persistent state còn?
+   ↙          ↘
+ YES          NO
+  ↓            ↓
+continue    app tự repair bằng quyền đã có
+               ↓
+          còn shell-only state bị reset?
+               ↓
+          chỉ lúc đó mới đề nghị
+          temporary Deep Repair
 ```
 
 Health screen phải nói rõ:
@@ -904,10 +991,11 @@ Health screen phải nói rõ:
 ```text
 Persistent protection: OK
 Runtime Greezer flag: reset
-Shizuku required: yes/no
+Core protection usable without Shizuku: YES/NO
+Deep Repair currently required: YES/NO
 ```
 
-Không làm user đoán.
+Mục tiêu là sau reboot đa số chức năng vẫn chạy chỉ bằng APK. Deep Repair không được là việc user phải làm sau mọi lần khởi động nếu có cách persistent hơn.
 
 ---
 
@@ -1286,26 +1374,30 @@ notification presentation
 
 Thứ tự code thực tế:
 
-1. Project skeleton.
-2. Logging.
-3. ROM Probe.
-4. Shizuku bootstrap.
-5. Persistent permission verification.
-6. Diagnostics model.
-7. MILLET controller.
-8. HyperOS 4 game allowlist controller.
-9. GMS thaw/reconnect.
-10. Aurogon controller.
-11. Per-app background policy.
-12. Doze/standby/hibernation.
-13. Notification diagnostics.
-14. Network diagnostics.
-15. Reboot audit.
-16. Rollback.
-17. Experimental cloud_* lab.
-18. Battery benchmark.
-19. Real overnight testing.
-20. Stable release.
+1. Project skeleton + Gradle Wrapper.
+2. GitHub Actions build APK.
+3. Logging.
+4. ROM Probe.
+5. Capability model.
+6. In-app bootstrap wizard.
+7. Shizuku integration chỉ cho temporary privilege.
+8. Persistent permission verification.
+9. Diagnostics model.
+10. MILLET controller.
+11. HyperOS 4 game allowlist controller.
+12. GMS thaw/reconnect.
+13. Aurogon controller.
+14. Per-app background policy.
+15. Doze/standby/hibernation.
+16. Notification diagnostics.
+17. Network diagnostics.
+18. Standalone-without-Shizuku validation.
+19. Reboot audit.
+20. Rollback.
+21. Experimental cloud_* lab.
+22. Battery benchmark.
+23. Real overnight testing.
+24. Release APK + stable release.
 
 Không đảo thứ tự bằng cách làm UI trước.
 
@@ -1315,11 +1407,16 @@ Không đảo thứ tự bằng cách làm UI trước.
 
 v1 được coi là đạt khi:
 
-- User cài APK.
-- Bootstrap bằng Shizuku một lần.
-- Tắt Shizuku.
-- Tắt Developer options.
+- Repo clean checkout tự build được APK bằng Gradle/GitHub Actions.
+- User chỉ cần cài **APK của project** làm ứng dụng lâu dài.
+- Toàn bộ thao tác chính được thực hiện từ UI của APK, không yêu cầu chạy script tay trên PC.
+- Lần mở đầu app tự probe ROM và tạo capability matrix.
+- Nếu cần bootstrap đặc quyền, app hướng dẫn và điều khiển flow đó; Shizuku/ADB chỉ là phương tiện tạm thời.
+- Sau bootstrap có thể tắt Shizuku.
+- Sau bootstrap có thể tắt Developer options.
+- Core protection vẫn hoạt động ở mức đã xác nhận khi chỉ còn APK chạy.
 - App vẫn audit và repair được các persistent core policy đã xác nhận.
+- Sau reboot, mở lại APK là đủ cho Quick Audit/normal repair; PC không phải flow recovery mặc định.
 - Messenger/Gmail/Instagram nhận push ổn định hơn baseline khi screen off.
 - GMS không bị HyperOS 4 nighttime freezer giết trong test đã support.
 - Không root.
@@ -1329,6 +1426,7 @@ v1 được coi là đạt khi:
 - Không disable toàn bộ freezer.
 - Có rollback.
 - Có diagnostics đủ để biết failure ở layer nào.
+- Mọi tính năng còn cần live Shizuku phải được tách thành Deep Repair/Advanced Diagnostic và không được giả là standalone.
 
 ---
 
@@ -1361,3 +1459,40 @@ v1 được coi là đạt khi:
   https://github.com/dingwen07/hyperos-fcm-fix/blob/main/docs/xiaomi-hyperos4-nighttime-fcm-investigation.md
 - Upstream implementation:
   https://github.com/dingwen07/hyperos-fcm-fix
+
+---
+
+# 31. Chỉ thị triển khai cho Codex
+
+Khi Codex bắt tay vào code, ưu tiên **tạo sản phẩm chạy được**, không dừng ở research hoặc sinh script.
+
+Mỗi phase phải để repo ở trạng thái buildable. Khi gặp API private/firmware-dependent:
+
+1. Implement interface/capability boundary trước.
+2. Probe runtime.
+3. Chỉ enable mutation nếu probe xác nhận.
+4. Có fallback `UNSUPPORTED` thay vì crash.
+5. Không chặn việc build APK chỉ vì một tweak vendor chưa xác nhận.
+
+Không được chuyển kiến trúc thành:
+
+```text
+Android app UI
+    ↓
+gọi một đống script yêu cầu PC
+```
+
+Kiến trúc đúng phải là:
+
+```text
+APK
+├── ROM Probe
+├── Diagnostics
+├── Persistent Guard
+├── Policy Engine
+├── Recovery Engine
+├── Shizuku Bootstrap Adapter (temporary)
+└── UI
+```
+
+Mục tiêu sau cùng là **release APK có thể cài trực tiếp lên Xiaomi và sử dụng như một app**, không phải bộ công cụ dành cho developer.
